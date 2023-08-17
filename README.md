@@ -49,5 +49,6 @@ if 'path/to/tiktokdownloader/' not in sys:
     sys.path.append('path/to/tiktokdownloader/')
 from tiktokdownloader.asyncttdownload import ttdownload
 from env import mstoken
-filename = await ttdownload.download(link=link, mstoken=mstoken)
+async def main():
+  filename = await ttdownload.download(link=link, mstoken=mstoken)
 ```
