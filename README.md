@@ -35,8 +35,8 @@ options:
 ## Python usage (not compatible with running event loop)
 ```python
 import sys
-if 'path/to/ttdownload.py' not in sys:
-    sys.path.append('path/to/ttdownload.py')
+if 'path/to/ttdownload/' not in sys:
+    sys.path.append('path/to/ttdownload/')
 from ttdownload import ttdownload
 from env import mstoken
 var = ttdownload(link=link, mstoken=mstoken)
@@ -45,8 +45,8 @@ filename = var.filename
 ## Python usage async
 ```python
 import sys
-if 'path/to/ttdownload.py' not in sys:
-    sys.path.append('path/to/ttdownload.py')
+if 'path/to/ttdownload/' not in sys:
+    sys.path.append('path/to/ttdownload/')
 from asyncttdownload import ttdownload
 from env import mstoken
 filename = await ttdownload.download(link=link, mstoken=mstoken)
