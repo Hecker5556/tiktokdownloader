@@ -75,8 +75,8 @@ class ttdownload:
             codecpattern = r'\"CodecType\":\"(.*?)(?=\")'
             codecmatches = re.findall(codecpattern, responsetext)
             url2 = None
-            for url, codec in zip(matches, codecmatches):
-                if codec in codecmatches:
+            for url, codecx in zip(matches, codecmatches):
+                if codec in codecx:
                     url2 = url
                     break
             if not url2:
