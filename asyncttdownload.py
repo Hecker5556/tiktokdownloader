@@ -63,7 +63,7 @@ class ttdownload:
         async with aiohttp.ClientSession() as session:
             logging.debug(f"[DOWNLOADING] - {link}")
             async with session.get(link, cookies=cookie, headers=headers) as response:
-                if response.status != 200:
+                if response.status != 200 and response.status != 206:
                     raise ttdownload.requesterror(f'{response.status} code')
                 logging.debug('Successfully downloaded webpage')
                 responsetext = await response.text()
@@ -81,8 +81,9 @@ class ttdownload:
                     break
             if not url2:
                 logging.debug('no h264, resorting to h265')
-            logging.debug(f'Successfully found video with codec: {codec}')
-            url2 = matches[0]
+                url2 = matches[0]
+            else:
+                logging.debug(f'Successfully found video with codec: {codec}')
             url1 = unquote(url2).encode('utf-8').decode('unicode_escape')
             url = url1.split('?')[0]
             oldparams = url1.split('?')[1].split('&')
