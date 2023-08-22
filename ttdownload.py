@@ -74,13 +74,14 @@ class ttdownload:
             codecmatches = re.findall(codecpattern, responsetext)
             url2 = None
             for url, codec in zip(matches, codecmatches):
-                if self.codec in codecmatches:
+                if self.codec in codec:
                     url2 = url
                     break
             if not url2:
                 logging.debug('no h264, resorting to h265')
-            logging.debug(f'Successfully found video with codec: {self.codec}')
-            url2 = matches[0]
+                url2 = matches[0]
+            else:
+                logging.debug(f'Successfully found video with codec: {self.codec}')
             url1 = unquote(url2).encode('utf-8').decode('unicode_escape')
             url = url1.split('?')[0]
             oldparams = url1.split('?')[1].split('&')
