@@ -61,7 +61,7 @@ class ttdownload:
         async with aiohttp.ClientSession() as session:
             logging.debug(f"[DOWNLOADING] - {self.link}")
             async with session.get(self.link, cookies=self.cookie, headers=self.headers) as response:
-                if response.status != 200:
+                if response.status != 200 and response.status != 206:
                     raise self.requesterror(f'{response.status} code')
                 logging.debug('Successfully downloaded webpage')
                 responsetext = await response.text()
