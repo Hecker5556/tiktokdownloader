@@ -33,7 +33,7 @@ class ttdownload:
         h264 (bool): whether to download a h264 codec only
         h265 (bool): whether to download h265 codec only
         by default h264, if both values are true raise twocodecs"""
-        pattern1 = r'(https?://)?(www\.)?(vm\.)?tiktok\.com/\S+'
+        pattern1 = r'(https?://)?(www\.)?(v(.*?)\.)?tiktok\.com/\S+'
         matches = re.findall(pattern1, link)
         if matches:
             pass

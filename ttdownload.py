@@ -31,7 +31,7 @@ class ttdownload:
         self.codec = 'h264' if h264 and not h265 else 'h265' if not h264 and h265 else 'h264' if not h264 and not h265 else None
         if not self.codec:
             raise self.twocodecs(f"Please only select one codec")
-        pattern1 = r'(https?://)?(www\.)?(vm\.)?tiktok\.com/\S+'
+        pattern1 = r'(https?://)?(www\.)?(v(.*?)\.)?tiktok\.com/\S+'
         matches = re.findall(pattern1, link)
         if matches:
             self.link = link
