@@ -1,5 +1,5 @@
 from urllib.parse import unquote
-import aiohttp, aiofiles, re
+import aiohttp, aiofiles, re, json
 from datetime import datetime
 import logging
 from tqdm.asyncio import tqdm
@@ -67,6 +67,30 @@ class ttdownload:
                     raise ttdownload.requesterror(f'{response.status} code')
                 logging.debug('Successfully downloaded webpage')
                 responsetext = await response.text()
+            authorpattern = r'\"author\":\"(.*?)(?=\")'
+            authormatches = re.findall(authorpattern, responsetext)
+            authorname = authormatches[0]
+            if '"imagePost":{"images":[{"imageURL":' in responsetext:
+                logging.info("not a video, slideshow")
+                pattern = r'\{\"images\":(?:.*?)\"title\":(?:.*?)}'
+                matches = re.findall(pattern, responsetext)
+                images = json.loads(matches[0])
+                filenames = []
+                for index, image in enumerate(images["images"]):
+                    url = image["imageURL"]["urlList"][0]
+                    filename = f"{authorname}-{index}-{round(datetime.now().timestamp())}.jpeg"
+                    async with session.get(url) as r:
+                        progress = tqdm(total=int(r.headers.get("content-length")), unit='iB', unit_scale=True)
+                        async with aiofiles.open(filename, 'wb') as f1:
+                            while True:
+                                chunk = await r.content.read(1024)
+                                if not chunk:
+                                    break
+                                await f1.write(chunk)
+                                progress.update(len(chunk))
+                        progress.close()
+                    filenames.append(filename)
+                return filenames
             pattern = r'\"UrlList\":\[\"(.*?)(?=\")'
             matches = re.findall(pattern, responsetext)
             if not matches:
