@@ -26,18 +26,17 @@ class ttdownload:
 
 
 
-    async def download(link: str, mstoken: str, h264: bool = False, h265: bool = False):
+    async def download(link: str, mstoken: str, watermark: bool = False, h264: bool = False, h265: bool = False):
         """download tiktok posts
         link (str): link to tiktok post
         mstoken (str): mstoken to use (from cookies)
+        watermark (bool, False): whether to download with watermark
         h264 (bool): whether to download a h264 codec only
         h265 (bool): whether to download h265 codec only
-        by default h264, if both values are true raise twocodecs"""
+        by default h264, if both values are true raise error twocodecs"""
         pattern1 = r'(https?://)?(www\.)?(v(.*?)\.)?tiktok\.com/\S+'
         matches = re.findall(pattern1, link)
-        if matches:
-            pass
-        else:
+        if not matches:
             raise ttdownload.invalidlink(f'{link} isnt a valid link prolly')
         codec = 'h264' if h264 and not h265 else 'h265' if not h264 and h265 else 'h264' if not h264 and not h265 else None
         if not codec:
@@ -91,7 +90,10 @@ class ttdownload:
                         progress.close()
                     filenames.append(filename)
                 return filenames
-            pattern = r'\"UrlList\":\[\"(.*?)(?=\")'
+            if not watermark:
+                pattern = r'\"UrlList\":\[\"(.*?)(?=\")'
+            else:
+                pattern = r"\"downloadAddr\":\"(.*?)\""
             matches = re.findall(pattern, responsetext)
             if not matches:
                 raise ttdownload.nomatches('couldnt find urls')
@@ -121,6 +123,9 @@ class ttdownload:
                 authorpattern = r'\"author\":\"(.*?)(?=\")'
                 authormatches = re.findall(authorpattern, responsetext)
                 authorname = authormatches[0]
+                if authorname == "author":
+                    authormatches = re.findall(r"\"uniqueId\":\"(.*?)\"", responsetext)
+                    authorname = authormatches[0]
                 filename = f"{authorname}-{int(datetime.now().timestamp())}.mp4"
                 async with aiofiles.open(filename, 'wb') as f1:
                     totalsize = float(response.headers.get('content-length'))

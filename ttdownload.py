@@ -21,10 +21,11 @@ class ttdownload:
     class invalidlink(Exception):
         def __init__(self, *args: object) -> None:
             super().__init__(*args)
-    def __init__(self, link: str, mstoken: str, h264: bool = False, h265: bool = False):
+    def __init__(self, link: str, mstoken: str, watermark: bool = False, h264: bool = False, h265: bool = False):
         """download tiktok posts
         link (str): link to tiktok post
         mstoken (str): mstoken to use (from cookies)
+        watermarked (bool, False): download watermarked version
         h264 (bool): whether to download a h264 codec only
         h265 (bool): whether to download h265 codec only
         by default h264, if both values are true raise twocodecs"""
@@ -54,7 +55,7 @@ class ttdownload:
             'sec-gpc': '1',
             'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.0.0.0 Safari/537.36',
         }
-
+        self.watermark = watermark
         asyncio.run(self.download())
         logging.debug(f'downloaded to {self.filename} codec {self.codec}')
     async def download(self):
@@ -68,6 +69,9 @@ class ttdownload:
             authorpattern = r'\"author\":\"(.*?)(?=\")'
             authormatches = re.findall(authorpattern, responsetext)
             authorname = authormatches[0]
+            if authorname == "author":
+                authormatches = re.findall(r"\"uniqueId\":\"(.*?)\"", responsetext)
+                authorname = authormatches[0]
             if '"imagePost":{"images":[{"imageURL":' in responsetext:
                 logging.info("not a video, slideshow")
                 pattern = r'\{\"images\":(?:.*?)\"title\":(?:.*?)}'
@@ -91,7 +95,10 @@ class ttdownload:
                 self.filename = filenames
                 self.codec = "images (jpeg)"
                 return self
-            pattern = r'\"UrlList\":\[\"(.*?)(?=\")'
+            if not self.watermark:
+                pattern = r'\"UrlList\":\[\"(.*?)(?=\")'
+            else:
+                pattern = r"\"downloadAddr\":\"(.*?)\""
             matches = re.findall(pattern, responsetext)
             if not matches:
                 raise self.nomatches('couldnt find urls')
@@ -146,8 +153,9 @@ class ttdownload:
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='download a tiktok post, you can specify which codec')
     parser.add_argument("link", help='link to tiktok video')
+    parser.add_argument("-w", action="store_true", help="whether to download watermarked version")
     parser.add_argument("-h264", action="store_true", help="whether to download h264 codec")
     parser.add_argument("-h265", action="store_true", help="whether to download h265 codec")
     args = parser.parse_args()
     from env import mstoken
-    ttdownload(link=args.link, mstoken=mstoken, h264=args.h264, h265=args.h265)
+    ttdownload(link=args.link, mstoken=mstoken, watermark=args.w, h264=args.h264, h265=args.h265)
