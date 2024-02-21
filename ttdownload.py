@@ -188,7 +188,7 @@ class ttdownload:
                 for index, image in enumerate(images["images"]):
                     url = image["imageURL"]["urlList"][0]
                     filename = f"{authorname}-{index}-{round(datetime.now().timestamp())}.jpeg"
-                    async with session.get(link) as r:
+                    async with session.get(url) as r:
                         with tqdm(total=int(r.headers.get("content-length")), unit='iB', unit_scale=True) as progress:
                             async with aiofiles.open(filename, 'wb') as f1:
                                 while True:
