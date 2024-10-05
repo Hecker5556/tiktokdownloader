@@ -109,7 +109,7 @@ class ttdownload:
             "tt-target-idc": "useast2a",
         }
         async with aiohttp.ClientSession() as session:
-            async with session.get(link, headers=headers) as r:
+            async with session.get(link, headers=headers, cookies=cookies) as r:
                 logging.debug(f"Response Code: {r.status}")
                 if r.status not in [200, 206]:
                     raise ttdownload.request_error(f"Failed to grab web source, code: {r.status}")
