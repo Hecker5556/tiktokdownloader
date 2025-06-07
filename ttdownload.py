@@ -143,18 +143,19 @@ class ttdownload:
             full_link = re.search(r'\"canonical\":\"(.*?)\"', response)
             if full_link:
                 item_id = re.search(r'https://(?:www\.)?tiktok\.com/@(?:.*?)/(?:.*?)/(\d*?)$', full_link[0].replace("\\u002F", "/"))
-                logging.debug(f"item_id: {item_id.group(0)}")
-                api_response = await self.get_api_response(item_id.group(), session)
-                if api_response['type'] != 'error' and api_response['type'] != 'video':
-                    # couldnt figure out how to download videos from the api, plus theyd be watermarked anyways
-                    logging.info(f"downloading {api_response['type']} from api")
-                    filenames = []
-                    extension = 'jpeg'
-                    for index, i in enumerate(api_response['links']):
-                        filename = f"{authorname}-{index}-{int(datetime.now().timestamp())}.{extension}"
-                        await self._download(i, filename, session, headers=headers)
-                        filenames.append(filename)
-                    return filenames
+                if item_id:
+                    logging.debug(f"item_id: {item_id.group(0)}")
+                    api_response = await self.get_api_response(item_id.group(), session)
+                    if api_response['type'] != 'error' and api_response['type'] != 'video':
+                        # couldnt figure out how to download videos from the api, plus theyd be watermarked anyways
+                        logging.info(f"downloading {api_response['type']} from api")
+                        filenames = []
+                        extension = 'jpeg'
+                        for index, i in enumerate(api_response['links']):
+                            filename = f"{authorname}-{index}-{int(datetime.now().timestamp())}.{extension}"
+                            await self._download(i, filename, session, headers=headers)
+                            filenames.append(filename)
+                        return filenames
             if '"imagePost":{"images":[{"imageURL":' in response:
                 logging.info("Downloading slideshow")
                 pattern = r'\{\"images\":(?:.*?)\"title\":(?:.*?)}'
@@ -179,7 +180,7 @@ class ttdownload:
                 pattern = r'\"UrlList\":\[\"(.*?)(?=\")'
             else:
                 pattern = r"\"downloadAddr\":\"(.*?)\""
-            matches = re.search(pattern, response)
+            matches = re.findall(pattern, response)
             if not matches:
                 pattern = r"\"video\":((?:.*?)VQScore\":\"\d+\"\})"
                 matches = re.search(pattern, response)
@@ -203,9 +204,9 @@ class ttdownload:
                                     progress.update(len(chunk))
                     return filename
             codecpattern = r'\"CodecType\":\"(.*?)(?=\")'
-            codecmatches = re.search(codecpattern, response)
+            codecmatches = re.findall(codecpattern, response)
             url2 = None
-            for url, codec in zip(matches, codecmatches.group(1)):
+            for url, codec in zip(matches, codecmatches):
                 if codec in codecs:
                     url2 = url
                     break
