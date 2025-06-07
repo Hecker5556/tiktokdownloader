@@ -1,4 +1,4 @@
 urllib3
 aiohttp
-aiofiles
 requests
+aiohttp_socks

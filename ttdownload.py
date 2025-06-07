@@ -1,9 +1,10 @@
 from urllib.parse import unquote
-import aiohttp, aiofiles, re, json
+import aiohttp, re, json
 from datetime import datetime
 import logging
 from tqdm import tqdm
 import argparse
+from aiohttp_socks import ProxyConnector
 class ttdownload:
     class nomatches(Exception):
         def __init__(self, *args: object) -> None:
@@ -56,7 +57,7 @@ class ttdownload:
             response = json.loads(await r.text(encoding="utf-8"))
         return self.parse_response(response)
     async def _download(self, link: str, filename: str, session: aiohttp.ClientSession, params: dict = None, headers: dict = None):
-        async with aiofiles.open(filename, 'wb') as f1:
+        with open(filename, 'wb') as f1:
             async with session.get(link, params=params, headers=headers) as r:
                 if r.status not in [200, 206]:
                     raise self.request_error(f"failed to get {r.url}, status {r.status}")
@@ -65,9 +66,11 @@ class ttdownload:
                     chunk = await r.content.read(1024)
                     if not chunk:
                         break
-                    await f1.write(chunk)
+                    f1.write(chunk)
                     progress.update(len(chunk))
-    async def async_download(self, link: str, watermark: bool = False, h264: bool = True, h265: bool = False, verbose: bool = False):
+    def give_connector(self, proxy: str = None):
+        return aiohttp.TCPConnector() if not proxy else ProxyConnector.from_url(proxy)
+    async def async_download(self, link: str, watermark: bool = False, h264: bool = True, h265: bool = False, verbose: bool = False, proxy: str = None):
         """download tiktok posts
         link (str): link to tiktok post
         watermarked (bool, False): download watermarked version
@@ -77,7 +80,7 @@ class ttdownload:
         logging.basicConfig(level=logging.DEBUG if verbose else logging.INFO, format="%(message)s")
         self.watermark = watermark
         link_pattern = r"(?:https)?://(?:www\.)?(?:v(?:.*?)\.)?tiktok\.com/\S+"
-        link = re.findall(link_pattern, link)
+        link = re.search(link_pattern, link)
         if not link:
             raise ttdownload.invalidlink(f"the link is invalid or the regex cant match it!")
         if h264 and h265:
@@ -88,7 +91,7 @@ class ttdownload:
             codecs = "h265_hvc1"
         else:
             codecs = "h264"
-        link = link[0]
+        link = link.group()
         headers = {
             'authority': 'v16-webapp-prime.tiktok.com',
             'accept': '*/*',
@@ -108,40 +111,40 @@ class ttdownload:
         cookies = {
             "tt-target-idc": "useast2a",
         }
-        async with aiohttp.ClientSession() as session:
+        async with aiohttp.ClientSession(connector=self.give_connector(proxy)) as session:
             async with session.get(link, headers=headers, cookies=cookies) as r:
                 logging.debug(f"Response Code: {r.status}")
                 if r.status not in [200, 206]:
                     raise ttdownload.request_error(f"Failed to grab web source, code: {r.status}")
                 response = await r.text()
             authorpattern = r'\"author\":\"(.*?)(?=\")'
-            authormatches = re.findall(authorpattern, response)
+            authormatches = re.search(authorpattern, response)
             if authormatches:
-                authorname = authormatches[0]
+                authorname = authormatches.group(1)
                 logging.debug(f"Author name first attempt: {authorname}")
             else:
                 authorname = "author"
             if authorname == "author":
-                authormatches = re.findall(r"\"uniqueId\":\"(.*?)\"", response)
+                authormatches = re.search(r"\"uniqueId\":\"(.*?)\"", response)
                 if authormatches:
-                    authorname = authormatches[0]
+                    authorname = authormatches.group(1)
                 else:
-                    authormatches = re.findall(r'\"canonical\":\"(.*?)\"', response)
+                    authormatches = re.search(r'\"canonical\":\"(.*?)\"', response)
                     if authormatches:
-                        authortemp = unquote(authormatches[0]).replace("\\u002F", "/")
-                        authormatches = re.findall(r'https://(?:www\.)?tiktok\.com/@(.*?)/', authortemp)
+                        authortemp = unquote(authormatches.group(0)).replace("\\u002F", "/")
+                        authormatches = re.search(r'https://(?:www\.)?tiktok\.com/@(.*?)/', authortemp)
                         if authormatches:
-                            authorname = authormatches[0]
+                            authorname = authormatches.group(1)
                         else:
                             authorname = "author"
                     else:
                         authorname = "author"
                 logging.debug(f"Author name second attempt: {authorname}")
-            full_link = re.findall(r'\"canonical\":\"(.*?)\"', response)
+            full_link = re.search(r'\"canonical\":\"(.*?)\"', response)
             if full_link:
-                item_id = re.findall(r'https://(?:www\.)?tiktok\.com/@(?:.*?)/(?:.*?)/(\d*?)$', full_link[0].replace("\\u002F", "/"))
-                logging.debug(f"item_id: {item_id[0]}")
-                api_response = await self.get_api_response(item_id[0], session)
+                item_id = re.search(r'https://(?:www\.)?tiktok\.com/@(?:.*?)/(?:.*?)/(\d*?)$', full_link[0].replace("\\u002F", "/"))
+                logging.debug(f"item_id: {item_id.group(0)}")
+                api_response = await self.get_api_response(item_id.group(), session)
                 if api_response['type'] != 'error' and api_response['type'] != 'video':
                     # couldnt figure out how to download videos from the api, plus theyd be watermarked anyways
                     logging.info(f"downloading {api_response['type']} from api")
@@ -155,20 +158,20 @@ class ttdownload:
             if '"imagePost":{"images":[{"imageURL":' in response:
                 logging.info("Downloading slideshow")
                 pattern = r'\{\"images\":(?:.*?)\"title\":(?:.*?)}'
-                matches = re.findall(pattern, response)
-                images = json.loads(matches[0])
+                matches = re.search(pattern, response)
+                images = json.loads(matches.group())
                 filenames = []
                 for index, image in enumerate(images["images"]):
                     url = image["imageURL"]["urlList"][0]
                     filename = f"{authorname}-{index}-{round(datetime.now().timestamp())}.jpeg"
                     async with session.get(url) as r:
                         with tqdm(total=int(r.headers.get("content-length")), unit='iB', unit_scale=True) as progress:
-                            async with aiofiles.open(filename, 'wb') as f1:
+                            with open(filename, 'wb') as f1:
                                 while True:
                                     chunk = await r.content.read(1024)
                                     if not chunk:
                                         break
-                                    await f1.write(chunk)
+                                    f1.write(chunk)
                                     progress.update(len(chunk))
                     filenames.append(filename)
                 return filenames
@@ -176,7 +179,7 @@ class ttdownload:
                 pattern = r'\"UrlList\":\[\"(.*?)(?=\")'
             else:
                 pattern = r"\"downloadAddr\":\"(.*?)\""
-            matches = re.findall(pattern, response)
+            matches = re.search(pattern, response)
             if not matches:
                 pattern = r"\"video\":((?:.*?)VQScore\":\"\d+\"\})"
                 matches = re.search(pattern, response)
@@ -191,24 +194,24 @@ class ttdownload:
                     filename = f"{authorname}-{round(datetime.now().timestamp())}.mp4"
                     async with session.get(video_url, headers=headers) as r:
                         with tqdm(total=int(r.headers.get("content-length")), unit='iB', unit_scale=True) as progress:
-                            async with aiofiles.open(filename, 'wb') as f1:
+                            with open(filename, 'wb') as f1:
                                 while True:
                                     chunk = await r.content.read(1024)
                                     if not chunk:
                                         break
-                                    await f1.write(chunk)
+                                    f1.write(chunk)
                                     progress.update(len(chunk))
                     return filename
             codecpattern = r'\"CodecType\":\"(.*?)(?=\")'
-            codecmatches = re.findall(codecpattern, response)
+            codecmatches = re.search(codecpattern, response)
             url2 = None
-            for url, codec in zip(matches, codecmatches):
+            for url, codec in zip(matches, codecmatches.group(1)):
                 if codec in codecs:
                     url2 = url
                     break
             if not url2:
                 logging.debug('no h264, resorting to h265')
-                url2 = matches[0]
+                url2 = matches.group(1  )
             else:
                 logging.debug(f'Successfully found video with codec: {codec}')
             url1 = unquote(url2).encode('utf-8').decode('unicode_escape')
@@ -220,12 +223,12 @@ class ttdownload:
             filename = f"{authorname}-{round(datetime.now().timestamp())}.mp4"
             async with session.get(url, params=params, headers=headers) as r:
                 with tqdm(total=int(r.headers.get("content-length")), unit='iB', unit_scale=True) as progress:
-                    async with aiofiles.open(filename, 'wb') as f1:
+                    with open(filename, 'wb') as f1:
                         while True:
                             chunk = await r.content.read(1024)
                             if not chunk:
                                 break
-                            await f1.write(chunk)
+                            f1.write(chunk)
                             progress.update(len(chunk))
             return filename
 
@@ -237,5 +240,6 @@ if __name__ == '__main__':
     parser.add_argument("-h264", action="store_true", help="whether to download h264 codec")
     parser.add_argument("-h265", action="store_true", help="whether to download h265 codec")
     parser.add_argument("-v", action="store_true", help="verbose")
+    parser.add_argument("-proxy", help="proxy to use with requests")
     args = parser.parse_args()
-    asyncio.run(ttdownload().async_download(link=args.link, watermark=args.w, h264=args.h264, h265=args.h265, verbose=args.v))
+    asyncio.run(ttdownload().async_download(link=args.link, watermark=args.w, h264=args.h264, h265=args.h265, verbose=args.v, proxy=args.proxy))
