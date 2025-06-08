@@ -13,7 +13,7 @@ class ttdownload:
         def __init__(self, *args: object) -> None:
             super().__init__(*args)
     class invalidlink(Exception):
-        def __init__(self, *args: object) -> None:
+        def __init__(self, *args: object) -> None:  
             super().__init__(*args)
     def parse_response(self, response: dict):
         if response['status_code'] != 0:
@@ -212,7 +212,7 @@ class ttdownload:
                     break
             if not url2:
                 logging.debug('no h264, resorting to h265')
-                url2 = matches.group(1  )
+                url2 = matches.group(1)
             else:
                 logging.debug(f'Successfully found video with codec: {codec}')
             url1 = unquote(url2).encode('utf-8').decode('unicode_escape')
@@ -243,4 +243,5 @@ if __name__ == '__main__':
     parser.add_argument("-v", action="store_true", help="verbose")
     parser.add_argument("-proxy", help="proxy to use with requests")
     args = parser.parse_args()
-    asyncio.run(ttdownload().async_download(link=args.link, watermark=args.w, h264=args.h264, h265=args.h265, verbose=args.v, proxy=args.proxy))
+    filename = asyncio.run(ttdownload().async_download(link=args.link, watermark=args.w, h264=args.h264, h265=args.h265, verbose=args.v, proxy=args.proxy))
+    print(filename)
