@@ -70,7 +70,7 @@ class ttdownload:
                     progress.update(len(chunk))
     def give_connector(self, proxy: str = None):
         return aiohttp.TCPConnector() if not proxy else ProxyConnector.from_url(proxy)
-    async def async_download(self, link: str, watermark: bool = False, h264: bool = True, h265: bool = False, verbose: bool = False, proxy: str = None):
+    async def async_download(self, link: str, watermark: bool = False, h264: bool = True, h265: bool = False, verbose: bool = False, proxy: str = None, sessionid: str = None):
         """download tiktok posts
         link (str): link to tiktok post
         watermarked (bool, False): download watermarked version
@@ -92,6 +92,7 @@ class ttdownload:
         else:
             codecs = "h264"
         link = link.group()
+
         headers = {
             'authority': 'v16-webapp-prime.tiktok.com',
             'accept': '*/*',
@@ -109,8 +110,10 @@ class ttdownload:
             'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.0.0.0 Safari/537.36',
         }
         cookies = {
-            "tt-target-idc": "useast2a",
+            'tt-target-idc': 'eu-ttp2',
         }
+        if sessionid:
+            cookies['sessionid'] = sessionid
         async with aiohttp.ClientSession(connector=self.give_connector(proxy)) as session:
             async with session.get(link, headers=headers, cookies=cookies) as r:
                 logging.debug(f"Response Code: {r.status}")
@@ -125,9 +128,9 @@ class ttdownload:
             else:
                 authorname = "author"
             if authorname == "author":
-                authormatches = re.search(r"\"uniqueId\":\"(.*?)\"", response)
+                authormatches = re.findall(r"\"uniqueId\":\"(.*?)\"", response)
                 if authormatches:
-                    authorname = authormatches.group(1)
+                    authorname = authormatches[0] if len(authormatches)==1 else authormatches[1]
                 else:
                     authormatches = re.search(r'\"canonical\":\"(.*?)\"', response)
                     if authormatches:
@@ -243,5 +246,12 @@ if __name__ == '__main__':
     parser.add_argument("-v", action="store_true", help="verbose")
     parser.add_argument("-proxy", help="proxy to use with requests")
     args = parser.parse_args()
-    filename = asyncio.run(ttdownload().async_download(link=args.link, watermark=args.w, h264=args.h264, h265=args.h265, verbose=args.v, proxy=args.proxy))
+    import os
+    sessionid = None
+    if os.path.exists("env.py"):
+        try:
+            from env import sessionid
+        except:
+            sessionid = None
+    filename = asyncio.run(ttdownload().async_download(link=args.link, watermark=args.w, h264=args.h264, h265=args.h265, verbose=args.v, proxy=args.proxy, sessionid=sessionid))
     print(filename)
