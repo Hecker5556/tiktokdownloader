@@ -215,7 +215,7 @@ class ttdownload:
                     break
             if not url2:
                 logging.debug('no h264, resorting to h265')
-                url2 = matches.group(1)
+                url2 = matches[0]
             else:
                 logging.debug(f'Successfully found video with codec: {codec}')
             url1 = unquote(url2).encode('utf-8').decode('unicode_escape')
