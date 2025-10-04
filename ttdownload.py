@@ -1,10 +1,11 @@
-from urllib.parse import unquote
+from urllib.parse import unquote, quote
 import aiohttp, re, json
 from datetime import datetime
 import logging
 from tqdm import tqdm
 import argparse
 from aiohttp_socks import ProxyConnector
+from yarl import URL
 class ttdownload:
     class nomatches(Exception):
         def __init__(self, *args: object) -> None:
@@ -163,7 +164,8 @@ class ttdownload:
                         authorname = api_response['author']
                         for index, i in enumerate(api_response['links']):
                             filename = f"{authorname}-{index}-{int(datetime.now().timestamp())}.{extension}"
-                            await self._download(i, filename, session, headers=headers)
+                            i = i.split("?")[0] + "?" + i.split("?")[1].replace("/", quote("/", safe=""))
+                            await self._download(URL(i, encoded=True), filename, session, headers=headers)
                             filenames.append(filename)
                         if api_response.get('music'):
                             url1 = unquote(api_response['music']['url']).encode('utf-8').decode('unicode_escape')
