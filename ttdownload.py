@@ -24,7 +24,13 @@ class ttdownload:
             links = []
             for image in images:
                 links.append(image.get("image_url")[0] if isinstance(image.get("image_url"), list) else image.get("image_url"))
-            return {"type": "slideshow", "links": links}
+            music = {}
+            if response['item_info']['item_basic'].get('music'):
+                m = response['item_info']['item_basic'].get('music')['basic']
+                music['author'] = m['author_name']
+                music['title'] = m['title']
+                music['url'] = m['music_play'].get('play_url')[0]
+            return {"type": "slideshow", "links": links, "music": music, "author": response['item_info']['item_basic']['creator']['base']['unique_id']}
         videos = response['item_info']['item_basic'].get('video')
         if videos:
             videos = videos.get('video_play_info')
@@ -50,7 +56,7 @@ class ttdownload:
             'user-agent': 'Mozilla/5.0 (Linux; Android 6.0; Nexus 5 Build/MRA58N) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Mobile Safari/537.36',
         }
         params = {
-            'app_id': '1233',
+            'app_id': '1988',
             'item_id': item_id,
         }
         async with session.get('https://www.tiktok.com/api/reflow/item/detail/', params=params, headers=headers) as r:
@@ -145,19 +151,36 @@ class ttdownload:
                 logging.debug(f"Author name second attempt: {authorname}")
             full_link = re.search(r'\"canonical\":\"(.*?)\"', response)
             if full_link:
-                item_id = re.search(r'https://(?:www\.)?tiktok\.com/@(?:.*?)/(?:.*?)/(\d*?)$', full_link[0].replace("\\u002F", "/"))
+                item_id = re.search(r'https://(?:www\.)?tiktok\.com/@(?:.*?)/(?:.*?)/(\d*?)$', full_link.group(1).replace("\\u002F", "/"))
                 if item_id:
-                    logging.debug(f"item_id: {item_id.group(0)}")
-                    api_response = await self.get_api_response(item_id.group(), session)
+                    logging.debug(f"item_id: {item_id.group(1)}")
+                    api_response = await self.get_api_response(item_id.group(1), session)
                     if api_response['type'] != 'error' and api_response['type'] != 'video':
                         # couldnt figure out how to download videos from the api, plus theyd be watermarked anyways
                         logging.info(f"downloading {api_response['type']} from api")
                         filenames = []
                         extension = 'jpeg'
+                        authorname = api_response['author']
                         for index, i in enumerate(api_response['links']):
                             filename = f"{authorname}-{index}-{int(datetime.now().timestamp())}.{extension}"
                             await self._download(i, filename, session, headers=headers)
                             filenames.append(filename)
+                        if api_response.get('music'):
+                            url1 = unquote(api_response['music']['url']).encode('utf-8').decode('unicode_escape')
+                            url = url1.split('?')[0]
+                            oldparams = url1.split('?')[1].split('&')
+                            params = {}
+                            for i in oldparams:
+                                params[i.split('=')[0]] = i.split('=')[1]
+                            async with session.get(url, params=params, headers=headers) as r:
+                                file = f"{authorname}-{index+1}-{int(datetime.now().timestamp())}.mp3"
+                                with open(file, "wb") as f1:
+                                    while True:
+                                        chunk = await r.content.read(1024)
+                                        if not chunk:
+                                            break
+                                        f1.write(chunk)
+                            filenames.append(file)
                         return filenames
             if '"imagePost":{"images":[{"imageURL":' in response:
                 logging.info("Downloading slideshow")
