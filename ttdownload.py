@@ -170,7 +170,9 @@ class ttdownload:
                         if api_response.get('music'):
                             url1 = unquote(api_response['music']['url']).encode('utf-8').decode('unicode_escape')
                             url = url1.split('?')[0]
-                            oldparams = url1.split('?')[1].split('&')
+                            oldparams = []
+                            if "?" in url1:
+                                oldparams = url1.split('?')[1].split('&')
                             params = {}
                             for i in oldparams:
                                 params[i.split('=')[0]] = i.split('=')[1]
