@@ -1,284 +1,254 @@
-from urllib.parse import unquote, quote
-import aiohttp, re, json
-from datetime import datetime
-import logging
-from tqdm import tqdm
-import argparse
+import asyncio
+import aiohttp
+import aiofiles
 from aiohttp_socks import ProxyConnector
-from yarl import URL
-class ttdownload:
-    class nomatches(Exception):
-        def __init__(self, *args: object) -> None:
+from datetime import datetime
+import json
+import re
+import argparse
+from traceback import print_exception
+from urllib.parse import unquote
+import os
+class TikTokDownloader():
+    def __init__(self, site_session: aiohttp.ClientSession = None, api_session: aiohttp.ClientSession = None, proxy: str = None):
+        self.site_session = site_session
+        self.api_session = api_session
+        self.proxy = proxy
+        self.close_site_session = None
+        self.close_api_session = None
+        self.session_choice = None
+    @staticmethod
+    def make_connector(proxy: str = None):
+        if proxy is None:
+            return aiohttp.TCPConnector()
+        return ProxyConnector.from_url(proxy)
+    async def __aenter__(self):
+        if self.site_session is None:
+            self.site_session = aiohttp.ClientSession(connector=self.make_connector(self.proxy))
+            self.close_site_session = True
+        if self.api_session is None:
+            self.api_session = aiohttp.ClientSession(connector=self.make_connector(self.proxy))
+            self.close_api_session = True
+        return self
+    async def __aexit__(self, exc, exctype, tb):
+        if exc:
+            print_exception(exc, exctype, tb)
+        if self.close_site_session is True:
+            await self.site_session.close()
+        if self.close_api_session is True:
+            await self.api_session.close()
+    class InvalidLink(BaseException):
+        def __init__(self, *args):
             super().__init__(*args)
-    class request_error(Exception):
-        def __init__(self, *args: object) -> None:
+    class PostUnavailable(BaseException):
+        def __init__(self, *args):
             super().__init__(*args)
-    class invalidlink(Exception):
-        def __init__(self, *args: object) -> None:  
+    class SizeTooBig(BaseException):
+        def __init__(self, *args):
             super().__init__(*args)
     def parse_response(self, response: dict):
         if response['status_code'] != 0:
             return {"type": "error"}
+
         images = response['item_info']['item_basic'].get('image')
+        music = {}
+        if response['item_info']['item_basic'].get('music'):
+            m = response['item_info']['item_basic'].get('music')['basic']
+            music['author'] = m['author_name']
+            music['title'] = m['title']
+            music['url'] = m['music_play'].get('play_url')[0]
+        stats = {}
+        stats['likes'] = response['item_info']['item_stats'].get('digg_count')
+        stats['comments'] = response['item_info']['item_stats'].get('comment_count')
+        stats['bookmarks'] = response['item_info']['item_stats'].get('collect_count')
+        stats['views'] = response['item_info']['item_stats'].get('play_count')
+        stats['shares'] = response['item_info']['item_stats'].get('share_count')
+        description = response['share_meta'].get('desc')
+        if description is not None and description.startswith("%!("):
+            description = description.split("string=")[-1][:-1]
+        create_time = response['item_info']['item_basic'].get('create_time')
         if images:
             images: list[dict] = images.get("images")
             links = []
             for image in images:
                 links.append(image.get("image_url")[0] if isinstance(image.get("image_url"), list) else image.get("image_url"))
-            music = {}
-            if response['item_info']['item_basic'].get('music'):
-                m = response['item_info']['item_basic'].get('music')['basic']
-                music['author'] = m['author_name']
-                music['title'] = m['title']
-                music['url'] = m['music_play'].get('play_url')[0]
-            return {"type": "slideshow", "links": links, "music": music, "author": response['item_info']['item_basic']['creator']['base']['unique_id']}
+            return {"type": "slideshow", "links": links, "music": music, "author": {"username": response['item_info']['item_basic']['creator']['base']['unique_id'], "avatar_url": response['item_info']['item_basic']['creator']['base']['avatar_larger'][0]},
+                    'stats': stats, 'description': description, 'date_posted': create_time}
         videos = response['item_info']['item_basic'].get('video')
         if videos:
             videos = videos.get('video_play_info')
-            videotype = "play_addr"
-            if self.watermark == True:
-                videotype = "download_addr"
-            links = []
-            for video in videos[videotype]:
-                links.append(video[0] if isinstance(video, list) else video)
-            return {"type": "video", "links": links}
+            link = videos['play_addr'][0]
+            return {"type": "video", "link": link, "music": music, 'stats': stats, 'description': description, 'date_posted': create_time,
+                    "author": {"username": response['item_info']['item_basic']['creator']['base']['unique_id'], "avatar_url": response['item_info']['item_basic']['creator']['base']['avatar_larger'][0]},
+                    }
         return {"type": "error"}
-    async def get_api_response(self, item_id: int, session: aiohttp.ClientSession):
+    async def _download(self, url: str, filename: str):
         headers = {
             'accept': '*/*',
-            'accept-language': 'en-US,en;q=0.6',
-            'sec-ch-ua': '"Brave";v="123", "Not:A-Brand";v="8", "Chromium";v="123"',
-            'sec-ch-ua-mobile': '?1',
-            'sec-ch-ua-platform': '"Android"',
-            'sec-fetch-dest': 'empty',
-            'sec-fetch-mode': 'cors',
-            'sec-fetch-site': 'same-origin',
-            'sec-gpc': '1',
-            'user-agent': 'Mozilla/5.0 (Linux; Android 6.0; Nexus 5 Build/MRA58N) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Mobile Safari/537.36',
-        }
-        params = {
-            'app_id': '1988',
-            'item_id': item_id,
-        }
-        async with session.get('https://www.tiktok.com/api/reflow/item/detail/', params=params, headers=headers) as r:
-            response = json.loads(await r.text(encoding="utf-8"))
-        return self.parse_response(response)
-    async def _download(self, link: str, filename: str, session: aiohttp.ClientSession, params: dict = None, headers: dict = None):
-        with open(filename, 'wb') as f1:
-            async with session.get(link, params=params, headers=headers) as r:
-                if r.status not in [200, 206]:
-                    raise self.request_error(f"failed to get {r.url}, status {r.status}")
-                progress = tqdm(total=int(r.headers.get("content-length")) if r.headers.get("content-length") else None, unit="iB", unit_scale=True)
-                while True:
-                    chunk = await r.content.read(1024)
-                    if not chunk:
-                        break
-                    f1.write(chunk)
-                    progress.update(len(chunk))
-    def give_connector(self, proxy: str = None):
-        return aiohttp.TCPConnector() if not proxy else ProxyConnector.from_url(proxy)
-    async def async_download(self, link: str, watermark: bool = False, h264: bool = True, h265: bool = False, verbose: bool = False, proxy: str = None, sessionid: str = None):
-        """download tiktok posts
-        link (str): link to tiktok post
-        watermarked (bool, False): download watermarked version
-        h264 (bool): whether to download a h264 codec only
-        h265 (bool): whether to download h265 codec only
-        by default h264, if both values are true, downloads first one that finds"""
-        logging.basicConfig(level=logging.DEBUG if verbose else logging.INFO, format="%(message)s")
-        self.watermark = watermark
-        link_pattern = r"(?:https)?://(?:www\.)?(?:v(?:.*?)\.)?tiktok\.com/\S+"
-        link = re.search(link_pattern, link)
-        if not link:
-            raise ttdownload.invalidlink(f"the link is invalid or the regex cant match it!")
-        if h264 and h265:
-            codecs = ["h264", "h265_hvc1"]
-        elif h264:
-            codecs = "h264"
-        elif h265:
-            codecs = "h265_hvc1"
-        else:
-            codecs = "h264"
-        link = link.group()
-
-        headers = {
-            'authority': 'v16-webapp-prime.tiktok.com',
-            'accept': '*/*',
-            'accept-language': 'en-US,en;q=0.9',
+            'accept-language': 'en-US,en;q=0.8',
+            'cache-control': 'no-cache',
             'origin': 'https://www.tiktok.com',
-            'range': 'bytes=0-',
+            'pragma': 'no-cache',
+            'priority': 'u=1, i',
             'referer': 'https://www.tiktok.com/',
-            'sec-ch-ua': '"Chromium";v="116", "Not)A;Brand";v="24", "Brave";v="116"',
+            'sec-ch-ua': '"Brave";v="147", "Not.A/Brand";v="8", "Chromium";v="147"',
             'sec-ch-ua-mobile': '?0',
             'sec-ch-ua-platform': '"Windows"',
-            'sec-fetch-dest': 'video',
+            'sec-fetch-dest': 'empty',
             'sec-fetch-mode': 'cors',
             'sec-fetch-site': 'same-site',
             'sec-gpc': '1',
-            'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.0.0.0 Safari/537.36',
+            'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36',
         }
-        cookies = {
-            'tt-target-idc': 'eu-ttp2',
-        }
-        if sessionid:
-            cookies['sessionid'] = sessionid
-        async with aiohttp.ClientSession(connector=self.give_connector(proxy)) as session:
-            async with session.get(link, headers=headers, cookies=cookies) as r:
-                logging.debug(f"Response Code: {r.status}")
-                if r.status not in [200, 206]:
-                    raise ttdownload.request_error(f"Failed to grab web source, code: {r.status}")
-                response = await r.text()
-            authorpattern = r'\"author\":\"(.*?)(?=\")'
-            authormatches = re.search(authorpattern, response)
-            if authormatches:
-                authorname = authormatches.group(1)
-                logging.debug(f"Author name first attempt: {authorname}")
+        async with aiofiles.open(filename, "wb") as f1:
+            params_string = url.split("?")[1]
+            base_url = url.split("?")[0]
+            new_params = {}
+            for i in params_string.split("&"):
+                key = i.split("=")[0]
+                value = unquote("=".join(i.split("=")[1:]))
+                new_params[key] = value
+            if self.session_choice:
+                async with self.api_session.get(base_url, params=new_params, headers=headers) as r:
+                    while True:
+                        chunk = await r.content.read(1024)
+                        if not chunk:
+                            break
+                        await f1.write(chunk)
             else:
-                authorname = "author"
-            if authorname == "author":
-                authormatches = re.findall(r"\"uniqueId\":\"(.*?)\"", response)
-                if authormatches:
-                    authorname = authormatches[0] if len(authormatches)==1 else authormatches[1]
-                else:
-                    authormatches = re.search(r'\"canonical\":\"(.*?)\"', response)
-                    if authormatches:
-                        authortemp = unquote(authormatches.group(0)).replace("\\u002F", "/")
-                        authormatches = re.search(r'https://(?:www\.)?tiktok\.com/@(.*?)/', authortemp)
-                        if authormatches:
-                            authorname = authormatches.group(1)
-                        else:
-                            authorname = "author"
-                    else:
-                        authorname = "author"
-                logging.debug(f"Author name second attempt: {authorname}")
-            full_link = re.search(r'\"canonical\":\"(.*?)\"', response)
-            if full_link:
-                item_id = re.search(r'https://(?:www\.)?tiktok\.com/@(?:.*?)/(?:.*?)/(\d*?)$', full_link.group(1).replace("\\u002F", "/"))
-                if item_id:
-                    logging.debug(f"item_id: {item_id.group(1)}")
-                    api_response = await self.get_api_response(item_id.group(1), session)
-                    if api_response['type'] != 'error' and api_response['type'] != 'video':
-                        # couldnt figure out how to download videos from the api, plus theyd be watermarked anyways
-                        logging.info(f"downloading {api_response['type']} from api")
-                        filenames = []
-                        extension = 'jpeg'
-                        authorname = api_response['author']
-                        for index, i in enumerate(api_response['links']):
-                            filename = f"{authorname}-{index}-{int(datetime.now().timestamp())}.{extension}"
-                            i = i.split("?")[0] + "?" + i.split("?")[1].replace("/", quote("/", safe=""))
-                            await self._download(URL(i, encoded=True), filename, session, headers=headers)
-                            filenames.append(filename)
-                        if api_response.get('music'):
-                            url1 = unquote(api_response['music']['url']).encode('utf-8').decode('unicode_escape')
-                            url = url1.split('?')[0]
-                            oldparams = []
-                            if "?" in url1:
-                                oldparams = url1.split('?')[1].split('&')
-                            params = {}
-                            for i in oldparams:
-                                params[i.split('=')[0]] = i.split('=')[1]
-                            async with session.get(url, params=params, headers=headers) as r:
-                                file = f"{authorname}-{index+1}-{int(datetime.now().timestamp())}.mp3"
-                                with open(file, "wb") as f1:
-                                    while True:
-                                        chunk = await r.content.read(1024)
-                                        if not chunk:
-                                            break
-                                        f1.write(chunk)
-                            filenames.append(file)
-                        return filenames
-            if '"imagePost":{"images":[{"imageURL":' in response:
-                logging.info("Downloading slideshow")
-                pattern = r'\{\"images\":(?:.*?)\"title\":(?:.*?)}'
-                matches = re.search(pattern, response)
-                images = json.loads(matches.group())
-                filenames = []
-                for index, image in enumerate(images["images"]):
-                    url = image["imageURL"]["urlList"][0]
-                    filename = f"{authorname}-{index}-{round(datetime.now().timestamp())}.jpeg"
-                    async with session.get(url) as r:
-                        with tqdm(total=int(r.headers.get("content-length")), unit='iB', unit_scale=True) as progress:
-                            with open(filename, 'wb') as f1:
-                                while True:
-                                    chunk = await r.content.read(1024)
-                                    if not chunk:
-                                        break
-                                    f1.write(chunk)
-                                    progress.update(len(chunk))
-                    filenames.append(filename)
-                return filenames
-            if not watermark:
-                pattern = r'\"UrlList\":\[\"(.*?)(?=\")'
-            else:
-                pattern = r"\"downloadAddr\":\"(.*?)\""
-            matches = re.findall(pattern, response)
-            if not matches:
-                pattern = r"\"video\":((?:.*?)VQScore\":\"\d+\"\})"
-                matches = re.search(pattern, response)
-                if not matches:
-                    raise ttdownload.nomatches('couldnt find urls')
-                else:
-                    video_info = json.loads(matches.group(1))
-                    if watermark:
-                        video_url = video_info.get("downloadAddr").encode().decode("unicode_escape")
-                    else:
-                        video_url = video_info.get("playAddr").encode().decode("unicode_escape")
-                    filename = f"{authorname}-{round(datetime.now().timestamp())}.mp4"
-                    async with session.get(video_url, headers=headers) as r:
-                        with tqdm(total=int(r.headers.get("content-length")), unit='iB', unit_scale=True) as progress:
-                            with open(filename, 'wb') as f1:
-                                while True:
-                                    chunk = await r.content.read(1024)
-                                    if not chunk:
-                                        break
-                                    f1.write(chunk)
-                                    progress.update(len(chunk))
-                    return filename
-            codecpattern = r'\"CodecType\":\"(.*?)(?=\")'
-            codecmatches = re.findall(codecpattern, response)
-            url2 = None
-            for url, codec in zip(matches, codecmatches):
-                if codec in codecs:
-                    url2 = url
-                    break
-            if not url2:
-                logging.debug('no h264, resorting to h265')
-                url2 = matches[0]
-            else:
-                logging.debug(f'Successfully found video with codec: {codec}')
-            url1 = unquote(url2).encode('utf-8').decode('unicode_escape')
-            url = url1.split('?')[0]
-            oldparams = url1.split('?')[1].split('&')
-            params = {}
-            for i in oldparams:
-                params[i.split('=')[0]] = i.split('=')[1]
-            filename = f"{authorname}-{round(datetime.now().timestamp())}.mp4"
-            async with session.get(url, params=params, headers=headers) as r:
-                with tqdm(total=int(r.headers.get("content-length")), unit='iB', unit_scale=True) as progress:
-                    with open(filename, 'wb') as f1:
-                        while True:
-                            chunk = await r.content.read(1024)
-                            if not chunk:
-                                break
-                            f1.write(chunk)
-                            progress.update(len(chunk))
-            return filename
+                  async with self.site_session.get(base_url, params=new_params, headers=headers) as r:
+                    while True:
+                        chunk = await r.content.read(1024)
+                        if not chunk:
+                            break
+                        await f1.write(chunk)
+    async def download(self, link: str, max_size: int = None):
+        """
+        Args:
+            link (str): link to a post
+            max_size (int, optional): max size of video in bytes
+        Returns:
+            dict: 
+                type (str): video / slideshow
 
-if __name__ == '__main__':
-    import asyncio
-    parser = argparse.ArgumentParser(description='download a tiktok post, you can specify which codec')
-    parser.add_argument("link", help='link to tiktok video')
-    parser.add_argument("-w", action="store_true", help="whether to download watermarked version")
-    parser.add_argument("-h264", action="store_true", help="whether to download h264 codec")
-    parser.add_argument("-h265", action="store_true", help="whether to download h265 codec")
-    parser.add_argument("-v", action="store_true", help="verbose")
-    parser.add_argument("-proxy", help="proxy to use with requests")
+                stats (dict): counts of likes, comments, shares, bookmarks
+
+                music (dict): author, title and link to music used in post
+
+                description (str): description used in video
+
+                date_posted (int): timestamp of post creation
+
+                links (list, optional): links of images in post
+
+                link (str, optional): link to video
+
+        """
+        link_regex = r"(?:https)?://(?:www\.)?(?:v(?:.*?)\.)?tiktok\.com/\S+"
+        if not (link_match := (await asyncio.to_thread(re.search, link_regex, link))):
+            raise self.InvalidLink(f"Link unrecognized")
+        url = link_match.group()
+        headers = {
+            'accept': '*/*',
+            'accept-language': 'en-US,en;q=0.8',
+            'cache-control': 'no-cache',
+            'origin': 'https://www.tiktok.com',
+            'pragma': 'no-cache',
+            'priority': 'u=1, i',
+            'referer': 'https://www.tiktok.com/',
+            'sec-ch-ua': '"Brave";v="147", "Not.A/Brand";v="8", "Chromium";v="147"',
+            'sec-ch-ua-mobile': '?0',
+            'sec-ch-ua-platform': '"Windows"',
+            'sec-fetch-dest': 'empty',
+            'sec-fetch-mode': 'cors',
+            'sec-fetch-site': 'same-site',
+            'sec-gpc': '1',
+            'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36',
+        }
+        async with self.site_session.get(url, headers=headers) as r:
+            if r.status not in [200, 204]:
+                raise ConnectionError(f"Failed to connect properly to {url} with status code: {r.status}")
+            response = await r.text("utf-8")
+        video_regex = r"\"webapp\.video-detail\":(\{\"itemInfo\":\{\"itemStruct(?:.*?)\}),\"webapp\.a-b\""
+        video_match = await asyncio.to_thread(re.search, video_regex, response)
+        result = {}
+        if not video_match:
+            canonical_regex = r"\"canonical\":\"https(?:.*?)(\d+)\""
+            item_id_match = await asyncio.to_thread(re.search, canonical_regex, response)
+            if item_id_match is None:
+                async with aiofiles.open("response.txt", "w", encoding="utf-8") as f1:
+                    await f1.write(response)
+                raise self.PostUnavailable(f"Couldn't find post info in site source")
+            params = {
+            'app_id': '1988',
+            'item_id': item_id_match.group(1),
+            }
+            async with self.api_session.get('https://www.tiktok.com/api/reflow/item/detail/', params=params, headers=headers) as r:
+                response = await r.json()
+            post = self.parse_response(response)
+            if post['type'] == 'error':
+                raise self.PostUnavailable(f"Couldnt fetch post from api")
+            result = post
+            self.session_choice = 1
+        else:
+            video_info = (await asyncio.to_thread(json.loads, video_match.group(1)))['itemInfo']['itemStruct']
+            result['type'] = 'video'
+            result['author'] = {
+                'username': video_info['author']['uniqueId'],
+                'avatar_url': video_info['author']['avatarLarger'],
+            }
+            result['stats'] = {
+                'likes': video_info['statsV2'].get('diggCount'),
+                'shares': video_info['statsV2'].get('shareCount'),
+                'comments': video_info['statsV2'].get('commentCount'),
+                'views': video_info['statsV2'].get('viewCount'),
+                'bookmarks': video_info['statsV2'].get('collectCount'),
+                'reposts': video_info['statsV2'].get('repostCount'),
+            }
+            result['music'] = {
+                'author': video_info['music']['authorName'],
+                'title': video_info['music']['title'],
+                'url': video_info['music']['playUrl']
+            }
+            result['description'] = (video_info['contents'][0].get('desc')).encode().decode("unicode_escape")
+            result['date_posted'] = video_info['createTime']
+            result['link'] = None
+            if max_size is None:
+                result['link'] = video_info['video']['bitrateInfo'][0]['PlayAddr']['UrlList'][1]
+            else:
+                for i in video_info['video']['bitrateInfo']:
+                    if int(i['PlayAddr']['DataSize']) < max_size:
+                        result['link'] = i['PlayAddr']['UrlList'][1]
+                        break
+                if result['link'] is None:
+                    raise self.SizeTooBig(f"Size of video formats larger than max_size: {max_size}")
+            self.session_choice = 0
+        result['filenames'] = []
+        if result['type'] == 'slideshow':
+            now = str(int(datetime.now().timestamp()))
+            if not os.path.exists(f"{result['author']['username']}"):
+                os.mkdir(result['author']['username'])
+            for idx, url in enumerate(result['links']):
+                filename = os.path.join(result['author']['username'], f"{result['author']['username']}-{now}-{idx}.jpg")
+                await self._download(url, filename)
+                result['filenames'].append(filename)
+            filename = os.path.join(result['author']['username'], f"{result['author']['username']}-{now}.mp3")
+            await self._download(result['music']['url'], filename)
+
+        else:
+            filename = f"{result['author']['username']}-{datetime.now().timestamp():.0f}.mp4"
+            await self._download(result['link'], filename)
+            result['filenames'].append(filename)
+        return result
+
+async def main(link: str, proxy: str = None, maxsize: int = None):
+    async with TikTokDownloader(proxy=proxy) as ttdownload:
+        result = await ttdownload.download(link, max_size=maxsize)
+        print(json.dumps(result, indent=4, ensure_ascii=False))
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("link", help="link to post")
+    parser.add_argument("--proxy", "-p", help="proxy to use with request")
+    parser.add_argument("--maxsize", "-m", help="max size in megabytes of a video", type=float)
     args = parser.parse_args()
-    import os
-    sessionid = None
-    if os.path.exists("env.py"):
-        try:
-            from env import sessionid
-        except:
-            sessionid = None
-    filename = asyncio.run(ttdownload().async_download(link=args.link, watermark=args.w, h264=args.h264, h265=args.h265, verbose=args.v, proxy=args.proxy, sessionid=sessionid))
-    print(filename)
+    asyncio.run(main(args.link, args.proxy, int(args.maxsize * (1024 * 1024)) if args.maxsize is not None else None))
