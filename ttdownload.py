@@ -37,13 +37,13 @@ class TikTokDownloader():
             await self.site_session.close()
         if self.close_api_session is True:
             await self.api_session.close()
-    class InvalidLink(BaseException):
+    class InvalidLink(Exception):
         def __init__(self, *args):
             super().__init__(*args)
-    class PostUnavailable(BaseException):
+    class PostUnavailable(Exception):
         def __init__(self, *args):
             super().__init__(*args)
-    class SizeTooBig(BaseException):
+    class SizeTooBig(Exception):
         def __init__(self, *args):
             super().__init__(*args)
     def parse_response(self, response: dict):
@@ -169,19 +169,23 @@ class TikTokDownloader():
             if r.status not in [200, 204]:
                 raise ConnectionError(f"Failed to connect properly to {url} with status code: {r.status}")
             response = await r.text("utf-8")
+        item_id_pattern = r"https(?:.*?)(\d+)$"
+        item_id = (await asyncio.to_thread(re.search, item_id_pattern, str(r.url).split("?")[0]))
         video_regex = r"\"webapp\.video-detail\":(\{\"itemInfo\":\{\"itemStruct(?:.*?)\}),\"webapp\.a-b\""
         video_match = await asyncio.to_thread(re.search, video_regex, response)
         result = {}
         if not video_match:
-            canonical_regex = r"\"canonical\":\"https(?:.*?)(\d+)\""
-            item_id_match = await asyncio.to_thread(re.search, canonical_regex, response)
-            if item_id_match is None:
-                async with aiofiles.open("response.txt", "w", encoding="utf-8") as f1:
-                    await f1.write(response)
-                raise self.PostUnavailable(f"Couldn't find post info in site source")
+            if item_id is None:
+                canonical_regex = r"\"canonical\":\"https(?:.*?)(\d+)\""
+                item_id = await asyncio.to_thread(re.search, canonical_regex, response)
+                if item_id is None:
+                    async with aiofiles.open("response.txt", "w", encoding="utf-8") as f1:
+                        await f1.write(response)
+                    raise self.PostUnavailable(f"Couldn't find post info in site source and url")
+
             params = {
             'app_id': '1988',
-            'item_id': item_id_match.group(1),
+            'item_id': item_id.group(1),
             }
             async with self.api_session.get('https://www.tiktok.com/api/reflow/item/detail/', params=params, headers=headers) as r:
                 response = await r.json()
