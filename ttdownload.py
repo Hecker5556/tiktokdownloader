@@ -101,13 +101,16 @@ class TikTokDownloader():
             'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36',
         }
         async with aiofiles.open(filename, "wb") as f1:
-            params_string = url.split("?")[1]
-            base_url = url.split("?")[0]
+            splitted = url.split("?")
+            base_url = splitted[0]
+
             new_params = {}
-            for i in params_string.split("&"):
-                key = i.split("=")[0]
-                value = unquote("=".join(i.split("=")[1:]))
-                new_params[key] = value
+            if (len(splitted) == 2):
+                params_string = splitted[1]
+                for i in params_string.split("&"):
+                    key = i.split("=")[0]
+                    value = unquote("=".join(i.split("=")[1:]))
+                    new_params[key] = value
             if self.session_choice:
                 async with self.api_session.get(base_url, params=new_params, headers=headers) as r:
                     while True:
