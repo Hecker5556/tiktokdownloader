@@ -9,6 +9,7 @@ import argparse
 from traceback import print_exception
 from urllib.parse import unquote
 import os
+import mimetypes
 class TikTokDownloader():
     def __init__(self, site_session: aiohttp.ClientSession = None, api_session: aiohttp.ClientSession = None, proxy: str = None):
         self.site_session = site_session
@@ -56,7 +57,7 @@ class TikTokDownloader():
             m = response['item_info']['item_basic'].get('music')['basic']
             music['author'] = m['author_name']
             music['title'] = m['title']
-            music['url'] = m['music_play'].get('play_url')[0]
+            music['url'] = m['music_play'].get('play_url', [])[0]
         stats = {}
         stats['likes'] = response['item_info']['item_stats'].get('digg_count')
         stats['comments'] = response['item_info']['item_stats'].get('comment_count')
@@ -80,9 +81,12 @@ class TikTokDownloader():
             link = videos['play_addr'][0]
             return {"type": "video", "link": link, "music": music, 'stats': stats, 'description': description, 'date_posted': create_time,
                     "author": {"username": response['item_info']['item_basic']['creator']['base']['unique_id'], "avatar_url": response['item_info']['item_basic']['creator']['base']['avatar_larger'][0]},
-                    }
+                    "codec": "h264",}
         return {"type": "error"}
     async def _download(self, url: str, filename: str):
+        """
+        downloads source from url to filename, returns ext
+        """
         headers = {
             'accept': '*/*',
             'accept-language': 'en-US,en;q=0.8',
@@ -113,18 +117,22 @@ class TikTokDownloader():
                     new_params[key] = value
             if self.session_choice:
                 async with self.api_session.get(base_url, params=new_params, headers=headers) as r:
+                    ext = mimetypes.guess_extension(r.headers.get("content-type"))
                     while True:
                         chunk = await r.content.read(1024)
                         if not chunk:
                             break
                         await f1.write(chunk)
+                    return ext
             else:
                   async with self.site_session.get(base_url, params=new_params, headers=headers) as r:
+                    ext = mimetypes.guess_extension(r.headers.get("content-type"))
                     while True:
                         chunk = await r.content.read(1024)
                         if not chunk:
                             break
                         await f1.write(chunk)
+                    return ext
     async def download(self, link: str, max_size: int = None):
         """
         Args:
@@ -172,7 +180,7 @@ class TikTokDownloader():
             if r.status not in [200, 204]:
                 raise ConnectionError(f"Failed to connect properly to {url} with status code: {r.status}")
             response = await r.text("utf-8")
-        item_id_pattern = r"https(?:.*?)(\d+)$"
+        item_id_pattern = r"https(?:.*?)/(\d+)/?$"
         item_id = (await asyncio.to_thread(re.search, item_id_pattern, str(r.url).split("?")[0]))
         video_regex = r"\"webapp\.video-detail\":(\{\"itemInfo\":\{\"itemStruct(?:.*?)\}),\"webapp\.a-b\""
         video_match = await asyncio.to_thread(re.search, video_regex, response)
@@ -222,10 +230,12 @@ class TikTokDownloader():
             result['link'] = None
             if max_size is None:
                 result['link'] = video_info['video']['bitrateInfo'][0]['PlayAddr']['UrlList'][1]
+                result['codec'] = video_info['video']['bitrateInfo'][0]['CodecType']
             else:
                 for i in video_info['video']['bitrateInfo']:
                     if int(i['PlayAddr']['DataSize']) < max_size:
                         result['link'] = i['PlayAddr']['UrlList'][1]
+                        result['codec'] = i['CodecType']
                         break
                 if result['link'] is None:
                     raise self.SizeTooBig(f"Size of video formats larger than max_size: {max_size}")
@@ -236,11 +246,18 @@ class TikTokDownloader():
             if not os.path.exists(f"{result['author']['username']}"):
                 os.mkdir(result['author']['username'])
             for idx, url in enumerate(result['links']):
-                filename = os.path.join(result['author']['username'], f"{result['author']['username']}-{now}-{idx}.jpg")
-                await self._download(url, filename)
+                filename = os.path.join(result['author']['username'], f"{result['author']['username']}-{now}-{idx}")
+                ext = await self._download(url, filename)
+                if ext is not None:
+                    os.rename(filename, filename+ext)
+                    filename += ext
                 result['filenames'].append(filename)
-            filename = os.path.join(result['author']['username'], f"{result['author']['username']}-{now}.mp3")
-            await self._download(result['music']['url'], filename)
+            filename = os.path.join(result['author']['username'], f"{result['author']['username']}-{now}")
+            ext = await self._download(result['music']['url'], filename)
+            if ext is not None:
+                os.rename(filename, filename+ext)
+                filename += ext
+            result['filenames'].append(filename)
 
         else:
             filename = f"{result['author']['username']}-{datetime.now().timestamp():.0f}.mp4"
