@@ -83,7 +83,7 @@ class TikTokDownloader():
                     "author": {"username": response['item_info']['item_basic']['creator']['base']['unique_id'], "avatar_url": response['item_info']['item_basic']['creator']['base']['avatar_larger'][0]},
                     "codec": "h264",}
         return {"type": "error"}
-    async def _download(self, url: str, filename: str):
+    async def _download(self, url: str, filename: str, maxsize: int = None):
         """
         downloads source from url to filename, returns ext
         """
@@ -117,6 +117,8 @@ class TikTokDownloader():
                     new_params[key] = value
             if self.session_choice:
                 async with self.api_session.get(base_url, params=new_params, headers=headers) as r:
+                    if maxsize and int(r.headers.get('content-length', 0)) > maxsize:
+                        raise self.SizeTooBig(f"Video larger than allowed threshold")
                     ext = mimetypes.guess_extension(r.headers.get("content-type"))
                     while True:
                         chunk = await r.content.read(1024)
@@ -126,6 +128,8 @@ class TikTokDownloader():
                     return ext
             else:
                   async with self.site_session.get(base_url, params=new_params, headers=headers) as r:
+                    if maxsize and int(r.headers.get('content-length', 0)) > maxsize:
+                        raise self.SizeTooBig(f"Video larger than allowed threshold")
                     ext = mimetypes.guess_extension(r.headers.get("content-type"))
                     while True:
                         chunk = await r.content.read(1024)
@@ -233,10 +237,16 @@ class TikTokDownloader():
                 result['codec'] = video_info['video']['bitrateInfo'][0]['CodecType']
             else:
                 for i in video_info['video']['bitrateInfo']:
-                    if int(i['PlayAddr']['DataSize']) < max_size:
+                    if int(i['PlayAddr']['DataSize']) < max_size and i['CodecType'] == 'h264':
                         result['link'] = i['PlayAddr']['UrlList'][1]
                         result['codec'] = i['CodecType']
                         break
+                if result['link'] is None:
+                    for i in video_info['video']['bitrateInfo']:
+                        if int(i['PlayAddr']['DataSize']) < max_size:
+                            result['link'] = i['PlayAddr']['UrlList'][1]
+                            result['codec'] = i['CodecType']
+                            break
                 if result['link'] is None:
                     raise self.SizeTooBig(f"Size of video formats larger than max_size: {max_size}")
             self.session_choice = 0
@@ -261,7 +271,7 @@ class TikTokDownloader():
 
         else:
             filename = f"{result['author']['username']}-{datetime.now().timestamp():.0f}.mp4"
-            await self._download(result['link'], filename)
+            await self._download(result['link'], filename, max_size)
             result['filenames'].append(filename)
         return result
 
