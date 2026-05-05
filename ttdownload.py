@@ -55,9 +55,9 @@ class TikTokDownloader():
         music = {}
         if response['item_info']['item_basic'].get('music'):
             m = response['item_info']['item_basic'].get('music')['basic']
-            music['author'] = m['author_name']
-            music['title'] = m['title']
-            music['url'] = m['music_play'].get('play_url', [])[0]
+            music['author'] = m.get('author_name')
+            music['title'] = m.get('title')
+            music['url'] = m.get('music_play', {}).get('play_url', [])[0]
         stats = {}
         stats['likes'] = response['item_info']['item_stats'].get('digg_count')
         stats['comments'] = response['item_info']['item_stats'].get('comment_count')
@@ -73,14 +73,14 @@ class TikTokDownloader():
             links = []
             for image in images:
                 links.append(image.get("image_url")[0] if isinstance(image.get("image_url"), list) else image.get("image_url"))
-            return {"type": "slideshow", "links": links, "music": music, "author": {"username": response['item_info']['item_basic']['creator']['base']['unique_id'], "avatar_url": response['item_info']['item_basic']['creator']['base']['avatar_larger'][0]},
+            return {"type": "slideshow", "links": links, "music": music, "author": {"username": response['item_info']['item_basic']['creator']['base'].get('unique_id'), "avatar_url": response['item_info']['item_basic']['creator']['base'].get('avatar_larger', [])[0]},
                     'stats': stats, 'description': description, 'date_posted': create_time}
         videos = response['item_info']['item_basic'].get('video')
         if videos:
             videos = videos.get('video_play_info')
             link = videos['play_addr'][0]
             return {"type": "video", "link": link, "music": music, 'stats': stats, 'description': description, 'date_posted': create_time,
-                    "author": {"username": response['item_info']['item_basic']['creator']['base']['unique_id'], "avatar_url": response['item_info']['item_basic']['creator']['base']['avatar_larger'][0]},
+                    "author": {"username": response['item_info']['item_basic']['creator']['base'].get('unique_id'), "avatar_url": response['item_info']['item_basic']['creator']['base'].get('avatar_larger', [])[0]},
                     "codec": "h264",}
         return {"type": "error"}
     async def _download(self, url: str, filename: str, maxsize: int = None):
@@ -212,10 +212,15 @@ class TikTokDownloader():
         else:
             video_info = (await asyncio.to_thread(json.loads, video_match.group(1)))['itemInfo']['itemStruct']
             result['type'] = 'video'
-            result['author'] = {
-                'username': video_info['author']['uniqueId'],
-                'avatar_url': video_info['author']['avatarLarger'],
-            }
+            if video_info.get('author') is not None:
+                result['author'] = {
+                    'username': video_info['author'].get('uniqueId'),
+                    'avatar_url': video_info['author'].get('avatarLarger'),
+                }
+            else:
+                result['author'] = {
+                    'username': 'author',
+                }
             result['stats'] = {
                 'likes': video_info['statsV2'].get('diggCount'),
                 'shares': video_info['statsV2'].get('shareCount'),
@@ -224,13 +229,16 @@ class TikTokDownloader():
                 'bookmarks': video_info['statsV2'].get('collectCount'),
                 'reposts': video_info['statsV2'].get('repostCount'),
             }
-            result['music'] = {
-                'author': video_info['music']['authorName'],
-                'title': video_info['music']['title'],
-                'url': video_info['music']['playUrl']
-            }
-            result['description'] = (video_info['contents'][0].get('desc')).encode().decode("unicode_escape")
-            result['date_posted'] = video_info['createTime']
+            if video_info.get('music') is not None:
+                result['music'] = {
+                    'author': video_info['music'].get('authorName'),
+                    'title': video_info['music'].get('title'),
+                    'url': video_info['music'].get('playUrl')
+                }
+            else:
+                result['music'] = {}
+            result['description'] = (video_info['contents'][0].get('desc', '')).encode().decode("unicode_escape") if len(video_info['contents']) > 0 else None
+            result['date_posted'] = video_info.get('createTime')
             result['link'] = None
             if max_size is None:
                 result['link'] = video_info['video']['bitrateInfo'][0]['PlayAddr']['UrlList'][1]
