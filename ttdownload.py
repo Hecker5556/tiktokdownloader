@@ -191,12 +191,14 @@ class TikTokDownloader():
         result = {}
         if not video_match:
             if item_id is None:
-                canonical_regex = r"\"canonical\":\"https(?:.*?)(\d+)\""
-                item_id = await asyncio.to_thread(re.search, canonical_regex, response)
+                item_id = (await asyncio.to_thread(re.search, item_id_pattern, url))
                 if item_id is None:
-                    async with aiofiles.open("response.txt", "w", encoding="utf-8") as f1:
-                        await f1.write(response)
-                    raise self.PostUnavailable(f"Couldn't find post info in site source and url")
+                    canonical_regex = r"\"canonical\":\"https(?:.*?)(\d+)\""
+                    item_id = await asyncio.to_thread(re.search, canonical_regex, response)
+                    if item_id is None:
+                        async with aiofiles.open("response.txt", "w", encoding="utf-8") as f1:
+                            await f1.write(response)
+                        raise self.PostUnavailable(f"Couldn't find post info in site source and url")
 
             params = {
             'app_id': '1988',
