@@ -275,6 +275,8 @@ class TikTokDownloader():
             filename = os.path.join(result['author']['username'], f"{result['author']['username']}-{now}")
             ext = await self._download(result['music']['url'], filename)
             if ext is not None:
+                if "ext" == ".mp4":
+                    ext = ".m4a"
                 os.rename(filename, filename+ext)
                 filename += ext
             result['filenames'].append(filename)
