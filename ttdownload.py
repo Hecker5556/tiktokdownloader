@@ -115,28 +115,24 @@ class TikTokDownloader():
                     key = i.split("=")[0]
                     value = unquote("=".join(i.split("=")[1:]))
                     new_params[key] = value
+            session = self.site_session
             if self.session_choice:
-                async with self.api_session.get(base_url, params=new_params, headers=headers) as r:
-                    if maxsize and int(r.headers.get('content-length', 0)) > maxsize:
-                        raise self.SizeTooBig(f"Video larger than allowed threshold")
+                session = self.api_session
+            async with session.get(base_url, params=new_params, headers=headers) as r:
+                if maxsize and int(r.headers.get('content-length', 0)) > maxsize:
+                    raise self.SizeTooBig(f"Video larger than allowed threshold")
+                ext = None
+                try:
                     ext = mimetypes.guess_extension(r.headers.get("content-type"))
-                    while True:
-                        chunk = await r.content.read(1024)
-                        if not chunk:
-                            break
-                        await f1.write(chunk)
-                    return ext
-            else:
-                  async with self.site_session.get(base_url, params=new_params, headers=headers) as r:
-                    if maxsize and int(r.headers.get('content-length', 0)) > maxsize:
-                        raise self.SizeTooBig(f"Video larger than allowed threshold")
-                    ext = mimetypes.guess_extension(r.headers.get("content-type"))
-                    while True:
-                        chunk = await r.content.read(1024)
-                        if not chunk:
-                            break
-                        await f1.write(chunk)
-                    return ext
+                except:
+                    print_exception()
+                while True:
+                    chunk = await r.content.read(1024)
+                    if not chunk:
+                        break
+                    await f1.write(chunk)
+                return ext
+
     async def download(self, link: str, max_size: int = None):
         """
         Args:
@@ -277,6 +273,10 @@ class TikTokDownloader():
             if ext is not None:
                 if "ext" == ".mp4":
                     ext = ".m4a"
+                os.rename(filename, filename+ext)
+                filename += ext
+            elif ext is None:
+                ext = ".mp3"
                 os.rename(filename, filename+ext)
                 filename += ext
             result['filenames'].append(filename)
