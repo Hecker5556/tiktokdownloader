@@ -1,0 +1,4 @@
+urllib3
+aiohttp==3.11.11
+aiohttp_socks
+aiofiles
