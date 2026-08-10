@@ -6,7 +6,7 @@ from datetime import datetime
 import json
 import re
 import argparse
-from traceback import print_exception
+from traceback import print_exception, print_exc
 from urllib.parse import unquote
 import os
 import mimetypes
@@ -125,7 +125,7 @@ class TikTokDownloader():
                 try:
                     ext = mimetypes.guess_extension(r.headers.get("content-type"))
                 except:
-                    print_exception()
+                    print_exc()
                 while True:
                     chunk = await r.content.read(1024)
                     if not chunk:
