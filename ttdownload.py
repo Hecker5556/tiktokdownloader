@@ -133,12 +133,13 @@ class TikTokDownloader():
                     await f1.write(chunk)
                 return ext
 
-    async def download(self, link: str, max_size: int = None, cookies: dict[str, str] = None):
+    async def download(self, link: str, max_size: int = None, cookies: dict[str, str] = None, nodownload: bool = False):
         """
         Args:
             link (str): link to a post
             max_size (int, optional): max size of video in bytes
             cookies (dict[str, str], optional): cookies to use with requests
+            nodownload (bool, optional): skip downloading and just return information on the post
         Returns:
             dict: 
                 type (str): video / slideshow
@@ -264,34 +265,35 @@ class TikTokDownloader():
                     raise self.SizeTooBig(f"Size of video formats larger than max_size: {max_size}")
             self.session_choice = 0
         result['filenames'] = []
-        if result['type'] == 'slideshow':
-            now = str(int(datetime.now().timestamp()))
-            if not os.path.exists(f"{result['author']['username']}"):
-                os.mkdir(result['author']['username'])
-            for idx, url in enumerate(result['links']):
-                filename = os.path.join(result['author']['username'], f"{result['author']['username']}-{now}-{idx}")
-                ext = await self._download(url, filename)
+        if nodownload is False:
+            if result['type'] == 'slideshow':
+                now = str(int(datetime.now().timestamp()))
+                if not os.path.exists(f"{result['author']['username']}"):
+                    os.mkdir(result['author']['username'])
+                for idx, url in enumerate(result['links']):
+                    filename = os.path.join(result['author']['username'], f"{result['author']['username']}-{now}-{idx}")
+                    ext = await self._download(url, filename)
+                    if ext is not None:
+                        os.rename(filename, filename+ext)
+                        filename += ext
+                    result['filenames'].append(filename)
+                filename = os.path.join(result['author']['username'], f"{result['author']['username']}-{now}")
+                ext = await self._download(result['music']['url'], filename)
                 if ext is not None:
+                    if ext == ".mp4":
+                        ext = ".m4a"
+                    os.rename(filename, filename+ext)
+                    filename += ext
+                elif ext is None:
+                    ext = ".mp3"
                     os.rename(filename, filename+ext)
                     filename += ext
                 result['filenames'].append(filename)
-            filename = os.path.join(result['author']['username'], f"{result['author']['username']}-{now}")
-            ext = await self._download(result['music']['url'], filename)
-            if ext is not None:
-                if ext == ".mp4":
-                    ext = ".m4a"
-                os.rename(filename, filename+ext)
-                filename += ext
-            elif ext is None:
-                ext = ".mp3"
-                os.rename(filename, filename+ext)
-                filename += ext
-            result['filenames'].append(filename)
 
-        else:
-            filename = f"{result['author']['username']}-{datetime.now().timestamp():.0f}.mp4"
-            await self._download(result['link'], filename, max_size)
-            result['filenames'].append(filename)
+            else:
+                filename = f"{result['author']['username']}-{datetime.now().timestamp():.0f}.mp4"
+                await self._download(result['link'], filename, max_size)
+                result['filenames'].append(filename)
         return result
 
 async def main(link: str, proxy: str = None, maxsize: int = None):
