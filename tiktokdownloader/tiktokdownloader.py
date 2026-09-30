@@ -197,7 +197,7 @@ class TikTokDownloader():
                         redirectUrl = r"\"redirectUrl\":\"(.*?)\""
                         redirect = await asyncio.to_thread(re.search, redirectUrl, response)
                         if redirect is None:
-                            async with aiofiles.open("response.txt", "w", encoding="utf-8") as f1:
+                            async with aiofiles.open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "response.txt"), "w", encoding="utf-8") as f1:
                                 await f1.write(response)
                             raise self.PostUnavailable(f"Couldn't find post info in site source and url")
                         redirect = (redirect.group(1)).encode().decode("unicode_escape")
@@ -296,14 +296,17 @@ class TikTokDownloader():
                 result['filenames'].append(filename)
         return result
 
-async def main(link: str, proxy: str = None, maxsize: int = None):
+async def async_main(link: str, proxy: str = None, maxsize: int = None, nodownload: bool = False):
     async with TikTokDownloader(proxy=proxy) as ttdownload:
-        result = await ttdownload.download(link, max_size=maxsize)
+        result = await ttdownload.download(link, max_size=maxsize, nodownload=nodownload)
         print(json.dumps(result, indent=4, ensure_ascii=False))
-if __name__ == "__main__":
+def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("link", help="link to post")
     parser.add_argument("--proxy", "-p", help="proxy to use with request")
     parser.add_argument("--maxsize", "-m", help="max size in megabytes of a video", type=float)
+    parser.add_argument("--no-download", "-n", help="return only information without downloading post media", action="store_true")
     args = parser.parse_args()
-    asyncio.run(main(args.link, args.proxy, int(args.maxsize * (1024 * 1024)) if args.maxsize is not None else None))
+    asyncio.run(async_main(args.link, args.proxy, int(args.maxsize * (1024 * 1024)) if args.maxsize is not None else None, args.no_download))
+if __name__ == "__main__":
+    main()

@@ -2,20 +2,12 @@
 ## First time setup
 ### 1. Download [python](https://python.org)
 ### 2. in command line 
-```bash
-git clone https://github.com/Hecker5556/tiktokdownloader
 ```
-### 3. 
-```bash
-cd tiktokdownloader
-```
-### 4. 
-```bash
-pip install -r requirements.txt
+pip install "git+https://github.com/Hecker5556/tiktokdownloader"
 ```
 ## Usage
 ```
-usage: ttdownload.py [-h] [--proxy PROXY] [--maxsize MAXSIZE] link
+usage: tiktokdownloader [-h] [--proxy PROXY] [--maxsize MAXSIZE] [--no-download] link
 
 positional arguments:
   link                  link to post
@@ -26,10 +18,11 @@ options:
                         proxy to use with request
   --maxsize MAXSIZE, -m MAXSIZE
                         max size in megabytes of a video
+  --no-download, -n     return only information without downloading post media
 ```
 ## Python usage
 ```python
-from ttdownload import TikTokDownloader
+from tiktokdownloader import TikTokDownloader
 
 async def main():
     async with TikTokDownloader() as ttd:
