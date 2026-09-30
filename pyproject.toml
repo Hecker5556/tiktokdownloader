@@ -16,6 +16,7 @@ dependencies = [
 "urllib3",
 "aiofiles",
 "curl_cffi",
+"git+https://github.com/Hecker5556/tiktok-web-signer"
 ]
 
 [project.scripts]
