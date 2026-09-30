@@ -1,34 +1,27 @@
 import asyncio
-import aiohttp
+from curl_cffi import AsyncSession, Response
 import aiofiles
-from aiohttp_socks import ProxyConnector
 from datetime import datetime
 import json
 import re
 import argparse
 from traceback import print_exception, print_exc
-from urllib.parse import unquote
 import os
 import mimetypes
 class TikTokDownloader():
-    def __init__(self, site_session: aiohttp.ClientSession = None, api_session: aiohttp.ClientSession = None, proxy: str = None):
+    def __init__(self, site_session: AsyncSession = None, api_session: AsyncSession = None, proxy: str = None):
         self.site_session = site_session
         self.api_session = api_session
         self.proxy = proxy
         self.close_site_session = None
         self.close_api_session = None
         self.session_choice = None
-    @staticmethod
-    def make_connector(proxy: str = None):
-        if proxy is None:
-            return aiohttp.TCPConnector()
-        return ProxyConnector.from_url(proxy)
     async def __aenter__(self):
         if self.site_session is None:
-            self.site_session = aiohttp.ClientSession(connector=self.make_connector(self.proxy))
+            self.site_session = AsyncSession(impersonate="chrome", proxies={"https": self.proxy})
             self.close_site_session = True
         if self.api_session is None:
-            self.api_session = aiohttp.ClientSession(connector=self.make_connector(self.proxy))
+            self.api_session = AsyncSession(impersonate="chrome", proxies={"https": self.proxy})
             self.close_api_session = True
         return self
     async def __aexit__(self, exc, exctype, tb):
@@ -89,50 +82,165 @@ class TikTokDownloader():
         """
         headers = {
             'accept': '*/*',
-            'accept-language': 'en-US,en;q=0.8',
-            'cache-control': 'no-cache',
+            'accept-language': 'en-US,en;q=0.7',
             'origin': 'https://www.tiktok.com',
-            'pragma': 'no-cache',
             'priority': 'u=1, i',
             'referer': 'https://www.tiktok.com/',
-            'sec-ch-ua': '"Brave";v="147", "Not.A/Brand";v="8", "Chromium";v="147"',
+            'sec-ch-ua': '"Chromium";v="154", "Brave";v="154", "Not A(Brand";v="99"',
             'sec-ch-ua-mobile': '?0',
             'sec-ch-ua-platform': '"Windows"',
             'sec-fetch-dest': 'empty',
             'sec-fetch-mode': 'cors',
             'sec-fetch-site': 'same-site',
             'sec-gpc': '1',
-            'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36',
+            'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36',
         }
-        async with aiofiles.open(filename, "wb") as f1:
-            splitted = url.split("?")
-            base_url = splitted[0]
 
-            new_params = {}
-            if (len(splitted) == 2):
-                params_string = splitted[1]
-                for i in params_string.split("&"):
-                    key = i.split("=")[0]
-                    value = unquote("=".join(i.split("=")[1:]))
-                    new_params[key] = value
+        async with aiofiles.open(filename, "wb") as f1:
             session = self.site_session
             if self.session_choice:
                 session = self.api_session
-            async with session.get(base_url, params=new_params, headers=headers) as r:
-                if maxsize and int(r.headers.get('content-length', 0)) > maxsize:
-                    raise self.SizeTooBig(f"Video larger than allowed threshold")
-                ext = None
-                try:
-                    ext = mimetypes.guess_extension(r.headers.get("content-type"))
-                except:
-                    print_exc()
-                while True:
-                    chunk = await r.content.read(1024)
-                    if not chunk:
-                        break
-                    await f1.write(chunk)
-                return ext
 
+            r: Response = await session.get(url, headers=headers, stream=True)
+            if maxsize and int(r.headers.get('content-length', 0)) > maxsize:
+                raise self.SizeTooBig(f"Video larger than allowed threshold")
+            ext = None
+            try:
+                ext = mimetypes.guess_extension(r.headers.get("content-type"))
+            except:
+                print_exc()
+            async for chunk in r.aiter_content(1024):
+                await f1.write(chunk)
+            return ext
+    async def newAPI(self, link: str, item_id: str, cookies: dict = None):
+        import tiktok_web_signer.xgnarly as xgnarly
+        import tiktok_web_signer.xdynosaur as xdynosaur
+        raw_qs = (
+            "aid=1988&app_name=tiktok_web"
+            "&browser_language=en-US&browser_name=Mozilla"
+            "&browser_platform=Win32"
+            "&browser_version=5.0%20%28Windows%20NT%2010.0%3B%20Win64%3B%20x64%29%20AppleWebKit%2F537.36%20%28KHTML%2C%20like%20Gecko%29%20Chrome%2F154.0.0.0%20Safari%2F537.36"
+            "&device_id=7691386644755924483&device_platform=web_pc"
+            f"&itemId={item_id}"
+            "&os=windows&region=PL"
+            "&screen_height=800&screen_width=1280"
+        ) 
+        ua = (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/154.0.0.0 Safari/537.36"
+        )
+        sign_opts = dict(
+            envcode=65,
+            canvas=3535508595,      
+            ubcode=14,              
+            version="5.3.2",
+            scm_version="1.0.0.417",
+            total_reqs=3,
+            enc_reqs=1,            
+        )
+        dyno = xdynosaur.encrypt(qs=raw_qs, body="", ua=ua, field_53=link, **sign_opts)
+        gnarly = xgnarly.encrypt(qs=raw_qs, body="", ua=ua, **{**sign_opts, "enc_reqs": 4})
+        final_url = (
+            f"https://www.tiktok.com/api/item/detail/?{raw_qs}"
+            f"&X-Dynosaur={dyno}"
+            f"&msToken="
+            f"&X-Bogus=1"
+            f"&X-Gnarly={gnarly}"
+        )
+        headers = {
+            "accept": "*/*",
+            "accept-language": "en-US,en;q=0.5",
+            "sec-ch-ua": '"Chromium";v="154", "Brave";v="154", "Not A(Brand";v="99"',
+            "sec-ch-ua-mobile": "?0",
+            "sec-ch-ua-platform": '"Windows"',
+            "sec-fetch-dest": "empty",
+            "sec-fetch-mode": "cors",
+            "sec-fetch-site": "same-origin",
+            "sec-gpc": "1",
+            "user-agent": ua,
+        }
+        response: Response = await self.site_session.get(final_url, headers=headers, cookies=cookies)
+        response_json = await asyncio.to_thread(json.loads, response.text)
+        return (response_json)
+    def parse_response_new(self, response: dict, max_size: int):
+        if response['statusCode'] != 0:
+            return {"type": "error"}
+        images = response['itemInfo']['itemStruct'].get('imagePost')
+        if images:
+            music = {}
+            if response['itemInfo']['itemStruct'].get('music'):
+                m = response['itemInfo']['itemStruct'].get('music')
+                music['author'] = m.get('authorName')
+                music['title'] = m.get('title')
+                music['url'] = m.get('playUrl', [])
+            stats = {}
+            stats['likes'] = response['itemInfo']['itemStruct']['statsV2'].get('diggCount')
+            stats['comments'] = response['itemInfo']['itemStruct']['statsV2'].get('commentCount')
+            stats['bookmarks'] = response['itemInfo']['itemStruct']['statsV2'].get('collectCount')
+            stats['views'] = response['itemInfo']['itemStruct']['statsV2'].get('playCount')
+            stats['shares'] = response['itemInfo']['itemStruct']['statsV2'].get('shareCount')
+            description = response['shareMeta'].get('desc')
+            if description is not None and description.startswith("%!("):
+                description = description.split("string=")[-1][:-1]
+            create_time = response['itemInfo']['itemStruct'].get('createTime')
+            images: list[dict] = images.get("images")
+            links = []
+            for image in images:
+                links.append(image.get("imageUrl")[0] if isinstance(image.get("imageUrl"), list) else image.get("imageUrl"))
+            return {"type": "slideshow", "links": links, "music": music, "author": {"username": response['itemInfo']['itemStruct']['author'].get('uniqueId'), "avatar_url": response['itemInfo']['itemStruct']['author'].get('avatarLarger', [])[0]},
+                    'stats': stats, 'description': description, 'date_posted': create_time}
+        video_info = response['itemInfo']['itemStruct']
+        result = {}
+        if video_info.get('video') is not None:
+            result['type'] = 'video'
+            if video_info.get('author') is not None:
+                result['author'] = {
+                    'username': video_info['author'].get('uniqueId'),
+                    'avatar_url': video_info['author'].get('avatarLarger'),
+                }
+            else:
+                result['author'] = {
+                    'username': 'author',
+                }
+            if video_info.get('statsV2') is not None:
+                result['stats'] = {
+                    'likes': video_info['statsV2'].get('diggCount'),
+                    'shares': video_info['statsV2'].get('shareCount'),
+                    'comments': video_info['statsV2'].get('commentCount'),
+                    'views': video_info['statsV2'].get('viewCount'),
+                    'bookmarks': video_info['statsV2'].get('collectCount'),
+                    'reposts': video_info['statsV2'].get('repostCount'),
+                }
+            if video_info.get('music') is not None:
+                result['music'] = {
+                    'author': video_info['music'].get('authorName'),
+                    'title': video_info['music'].get('title'),
+                    'url': video_info['music'].get('playUrl')
+                }
+            else:
+                result['music'] = {}
+            result['description'] = (video_info['contents'][0].get('desc', '')).encode().decode("unicode_escape") if len(video_info['contents']) > 0 else None
+            result['date_posted'] = video_info.get('createTime')
+            result['link'] = None
+            if max_size is None:
+                result['link'] = (video_info['video']['bitrateInfo'][0]['PlayAddr']['UrlList'][0])
+                result['codec'] = video_info['video']['bitrateInfo'][0]['CodecType']
+            else:
+                for i in video_info['video']['bitrateInfo']:
+                    if int(i['PlayAddr']['DataSize']) < max_size:
+                        result['link'] = i['PlayAddr']['UrlList'][0]
+                        result['codec'] = i['CodecType']
+                        break
+                if result['link'] is None:
+                    for i in video_info['video']['bitrateInfo']:
+                        if int(i['PlayAddr']['DataSize']) < max_size:
+                            result['link'] = i['PlayAddr']['UrlList'][0]
+                            result['codec'] = i['CodecType']
+                            break
+                if result['link'] is None:
+                    raise self.SizeTooBig(f"Size of video formats larger than max_size: {max_size}")
+        return result 
     async def download(self, link: str, max_size: int = None, cookies: dict[str, str] = None, nodownload: bool = False):
         """
         Args:
@@ -178,16 +286,17 @@ class TikTokDownloader():
             'sec-gpc': '1',
             'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36',
         }
-        async with self.site_session.get(url, headers=headers, cookies=cookies) as r:
-            if r.status not in [200, 204]:
-                raise ConnectionError(f"Failed to connect properly to {url} with status code: {r.status}")
-            response = await r.text("utf-8")
+        r: Response = await self.site_session.get(url, headers=headers, cookies=cookies, stream=True)
+        if r.status_code not in [200, 204]:
+            raise ConnectionError(f"Failed to connect properly to {url} with status code: {r.status_code}")
+        real_url = r.url
+        response = await r.atext()
         item_id_pattern = r"https(?:.*?)/(\d+)/?$"
         item_id = (await asyncio.to_thread(re.search, item_id_pattern, str(r.url).split("?")[0]))
         video_regex = r"\"webapp\.video-detail\":(\{\"itemInfo\":\{\"itemStruct(?:.*?)\}),\"webapp\.a-b\""
         video_match = await asyncio.to_thread(re.search, video_regex, response)
         result = {}
-        if not video_match:
+        if video_match is None:
             if item_id is None:
                 item_id = (await asyncio.to_thread(re.search, item_id_pattern, url))
                 if item_id is None:
@@ -202,18 +311,29 @@ class TikTokDownloader():
                             raise self.PostUnavailable(f"Couldn't find post info in site source and url")
                         redirect = (redirect.group(1)).encode().decode("unicode_escape")
                         item_id = (await asyncio.to_thread(re.search, item_id_pattern, redirect.split("?")[0]))
-
-            params = {
-            'app_id': '1988',
-            'item_id': item_id.group(1),
-            }
-            async with self.api_session.get('https://www.tiktok.com/api/reflow/item/detail/', params=params, headers=headers, cookies=cookies,) as r:
-                response = await r.json()
-            post = self.parse_response(response)
-            if post['type'] == 'error':
-                raise self.PostUnavailable(f"Couldnt fetch post from api")
-            result = post
-            self.session_choice = 1
+            real_url = real_url.split("https://")[1].split("?")[0]
+            try:
+                response = await self.newAPI(real_url, item_id.group(1), cookies=cookies)
+                self.session_choice = 0
+                post = self.parse_response_new(response, max_size)
+                if post['type'] == 'error':
+                    raise self.PostUnavailable(f"Couldnt fetch post from api")
+                post['api'] = 1
+                result = post
+            except:
+                print_exc()
+                params = {
+                'app_id': '1988',
+                'item_id': item_id.group(1),
+                }
+                r: Response = await self.api_session.get('https://www.tiktok.com/api/reflow/item/detail/', params=params, headers=headers, cookies=cookies)
+                response = r.json()
+                post = self.parse_response(response)
+                if post['type'] == 'error':
+                    raise self.PostUnavailable(f"Couldnt fetch post from api")
+                post['api'] = 0
+                result = post
+                self.session_choice = 1
         else:
             video_info = (await asyncio.to_thread(json.loads, video_match.group(1)))['itemInfo']['itemStruct']
             result['type'] = 'video'
@@ -247,11 +367,11 @@ class TikTokDownloader():
             result['date_posted'] = video_info.get('createTime')
             result['link'] = None
             if max_size is None:
-                result['link'] = video_info['video']['bitrateInfo'][0]['PlayAddr']['UrlList'][1]
+                result['link'] = video_info['video']['bitrateInfo'][0]['PlayAddr']['UrlList'][0]
                 result['codec'] = video_info['video']['bitrateInfo'][0]['CodecType']
             else:
                 for i in video_info['video']['bitrateInfo']:
-                    if int(i['PlayAddr']['DataSize']) < max_size and i['CodecType'] == 'h264':
+                    if int(i['PlayAddr']['DataSize']) < max_size:
                         result['link'] = i['PlayAddr']['UrlList'][1]
                         result['codec'] = i['CodecType']
                         break
