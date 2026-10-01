@@ -187,7 +187,7 @@ class TikTokDownloader():
             images: list[dict] = images.get("images")
             links = []
             for image in images:
-                links.append(image.get("imageUrl")[0] if isinstance(image.get("imageUrl"), list) else image.get("imageUrl"))
+                links.append(image.get('imageURL', {}).get('urlList', [None])[0])
             return {"type": "slideshow", "links": links, "music": music, "author": {"username": response['itemInfo']['itemStruct']['author'].get('uniqueId'), "avatar_url": response['itemInfo']['itemStruct']['author'].get('avatarLarger', [])[0]},
                     'stats': stats, 'description': description, 'date_posted': create_time}
         video_info = response['itemInfo']['itemStruct']
